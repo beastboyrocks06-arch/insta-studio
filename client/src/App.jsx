@@ -131,7 +131,7 @@ export default function App() {
     setResults([]);
     setMessage({ type: 'info', text: 'Uploading media and publishing to the selected accounts…' });
     try {
-      const mediaUrls = await Promise.all(files.map(uploadFile));
+      const mediaUrls = await Promise.all(Array.from(files).map(uploadFile));
       const response = await api('/api/instagram/publish', {
         method: 'POST',
         body: JSON.stringify({ mediaType, mediaUrls, caption, accountIds: selectedAccounts }),
@@ -214,7 +214,7 @@ export default function App() {
               </section>
               <section className="content-card">
                 <div className="section-title"><span className="step">02</span><div><h2>Add your media</h2><p className="muted">Files are securely uploaded to Cloudinary before publishing.</p></div></div>
-                <label className="upload-zone"><input type="file" accept={media.accept} multiple={media.multiple} onChange={(event) => setFiles(event.target.files)} /><span className="upload-icon">↑</span><strong>Choose {mediaType === 'CAROUSEL' ? 'images' : mediaType === 'REELS' ? 'a video' : 'an image'}</strong><span className="muted">{media.help}</span><span className="upload-link">Browse files</span></label>
+                <label className="upload-zone"><input type="file" accept={media.accept} multiple={media.multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} /><span className="upload-icon">↑</span><strong>Choose {mediaType === 'CAROUSEL' ? 'images' : mediaType === 'REELS' ? 'a video' : 'an image'}</strong><span className="muted">{media.help}</span><span className="upload-link">Browse files</span></label>
                 {selectedFiles.length > 0 && <ul className="file-list">{selectedFiles.map((file) => <li key={`${file.name}-${file.size}`}>▧ <span>{file.name}</span><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></li>)}</ul>}
               </section>
               <section className="content-card">

@@ -7,6 +7,15 @@ let pool;
 
 function getPool() {
   if (!config.databaseUrl) throw new Error('DATABASE_URL is missing. Configure the Neon connection string in the server environment.');
+  let databaseUrl;
+  try {
+    databaseUrl = new URL(config.databaseUrl);
+  } catch {
+    throw Object.assign(new Error('DATABASE_URL must be a valid PostgreSQL connection URL.'), { status: 503 });
+  }
+  if (!databaseUrl.pathname || databaseUrl.pathname === '/') {
+    throw Object.assign(new Error('DATABASE_URL is missing its database name. Copy the full Neon connection string, including the database name after the host.'), { status: 503 });
+  }
   if (!pool) {
     pool = new Pool({
       connectionString: config.databaseUrl,

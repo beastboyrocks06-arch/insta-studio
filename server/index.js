@@ -28,6 +28,11 @@ app.use('/api', (req, res) => {
 app.use((error, req, res, next) => {
   console.error('Request failed:', error.code || error.name);
   if (res.headersSent) return next(error);
+  if (error.code === '3D000') {
+    return res.status(503).json({
+      error: 'The database named in DATABASE_URL does not exist. Copy the Neon connection string for the same database where you ran database/schema.sql.',
+    });
+  }
   const status = Number.isInteger(error.status) && error.status >= 400 ? error.status : 500;
   res.status(status).json({
     error: status === 500 ? 'Request failed. Check server configuration and logs.' : error.message,
