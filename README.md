@@ -25,14 +25,15 @@ These endpoints and scopes are from my knowledge of Meta's docs, not verified li
    - **Facebook Login:** add *Facebook Login for Business* (or Facebook Login) and put the redirect URI under *Valid OAuth Redirect URIs*. Your Instagram account must be Business/Creator and linked to a Facebook Page you manage.
 4. Your Instagram account must be a **professional** (Business or Creator) account.
 5. While the app is in **Development mode**, only people with a role on the app (add your test account under App roles / Instagram testers, and accept the invite) can authorize. Serving other accounts requires App Review and Advanced Access for the publish permission.
-6. Copy `.env.example` to `.env` and set `APP_USERNAME`, `APP_PASSWORD`, `DATABASE_URL`, `META_APP_ID`, `META_APP_SECRET`, and `META_LOGIN_TYPE`. Set the three `CLOUDINARY_*` values for uploads.
-   - In Neon, create a PostgreSQL project and copy its connection string into `DATABASE_URL`. The app creates its required tables at startup.
-7. Redirect URI (must match the dashboard and `.env` character for character):
+6. In Neon, create a PostgreSQL project and run the SQL in [`database/schema.sql`](./database/schema.sql) once in its SQL Editor.
+7. Copy `.env.example` to `.env` and set `APP_USERNAME`, `APP_PASSWORD`, `DATABASE_URL`, `META_APP_ID`, `META_APP_SECRET`, and `META_LOGIN_TYPE`. Set the three `CLOUDINARY_*` values for uploads.
+   - Copy the Neon connection string into `DATABASE_URL`.
+8. Redirect URI (must match the dashboard and `.env` character for character):
 
        http://localhost:5000/api/auth/callback
 
    If you change `PORT`, update `META_REDIRECT_URI` and the dashboard to match. Some Meta products require HTTPS redirect URIs even for localhost; if so, use an HTTPS tunnel and set `META_REDIRECT_URI`, `BACKEND_URL` and `FRONTEND_URL` accordingly.
-8. `npm run dev`, then open http://localhost:5173
+9. `npm run dev`, then open http://localhost:5173
 
 ## Using the publisher
 
@@ -59,4 +60,4 @@ Reel video URLs must be publicly fetchable by Instagram (H.264/AAC, vertical 9:1
 - *No Page with linked Instagram account* (Facebook flow): link the IG account to a Page and grant that Page at login.
 - Container `ERROR`: unsupported codec/size/duration or the URL isn't publicly fetchable.
 - *Cloudinary upload is not configured*: set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `.env`.
-- *Neon database is not configured*: set `DATABASE_URL` to the Neon PostgreSQL connection string; the server will not start without a reachable database.
+- *Neon database is not configured*: set `DATABASE_URL` to the Neon PostgreSQL connection string and run [`database/schema.sql`](./database/schema.sql) once in Neon.

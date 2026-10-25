@@ -6,7 +6,6 @@ import authRoutes, { handleOAuthCallback } from './routes/auth.js';
 import instagramRoutes from './routes/instagram.js';
 import mediaRoutes from './routes/media.js';
 import { asyncRoute, requireAuth } from './session.js';
-import { initializeDatabase } from './db.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,22 +49,13 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-initializeDatabase().then(() => {
-  app.listen(config.port, () => {
-    console.log(
-      `Server on ${config.backendUrl} (login type: ${config.loginType}, Graph ${config.version})`
-    );
-
-    const p = configProblems();
-    if (p.length) {
-      console.warn('Configuration problems:\n - ' + p.join('\n - '));
-    }
-  });
-}).catch((error) => {
-  console.error(
-    config.databaseUrl
-      ? `Unable to initialize Neon database: ${error.code || error.name}`
-      : 'Unable to initialize Neon database: DATABASE_URL is missing. Add the Neon connection string to the server environment.',
+app.listen(config.port, () => {
+  console.log(
+    `Server on ${config.backendUrl} (login type: ${config.loginType}, Graph ${config.version})`
   );
-  process.exitCode = 1;
+
+  const p = configProblems();
+  if (p.length) {
+    console.warn('Configuration problems:\n - ' + p.join('\n - '));
+  }
 });
