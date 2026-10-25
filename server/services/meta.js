@@ -95,8 +95,8 @@ export const createImageContainer = (conn, imageUrl, caption) =>
 
 export const createCarouselItem = (conn, mediaUrl, mediaType) =>
   call(base(`${conn.igUserId}/media`), form({
-    [mediaType === 'REELS' ? 'video_url' : 'image_url']: mediaUrl,
-    ...(mediaType === 'REELS' ? { media_type: 'VIDEO' } : {}),
+    [mediaType === 'VIDEO' ? 'video_url' : 'image_url']: mediaUrl,
+    ...(mediaType === 'VIDEO' ? { media_type: 'VIDEO' } : {}),
     is_carousel_item: 'true',
     access_token: conn.accessToken,
   }), 'create_carousel_item');

@@ -62,12 +62,12 @@ async function waitForContainer(session, connection, containerId) {
   }
 }
 
-async function createContainer(connection, mediaType, mediaUrls, caption, session) {
-  if (mediaType === 'REELS') return createReelContainer(connection, mediaUrls[0], caption);
-  if (mediaType === 'IMAGE') return createImageContainer(connection, mediaUrls[0], caption);
+async function createContainer(connection, mediaType, mediaItems, caption, session) {
+  if (mediaType === 'REELS') return createReelContainer(connection, mediaItems[0].mediaUrl, caption);
+  if (mediaType === 'IMAGE') return createImageContainer(connection, mediaItems[0].mediaUrl, caption);
   const childIds = [];
-  for (const mediaUrl of mediaUrls) {
-    const child = await createCarouselItem(connection, mediaUrl, 'IMAGE');
+  for (const mediaItem of mediaItems) {
+    const child = await createCarouselItem(connection, mediaItem.mediaUrl, mediaItem.mediaType);
     childIds.push(child.id);
     await waitForContainer(session, connection, child.id);
   }
@@ -102,10 +102,11 @@ router.get('/history.csv', async (req, res, next) => {
 router.post('/publish', async (req, res, next) => {
   const session = req.appSession;
   if (publishingSessions.has(session.sid)) return res.status(409).json({ error: 'A publish is already in progress' });
-  const { mediaType, mediaUrls, videos, caption = '', accountIds } = req.body || {};
+  const { mediaType, mediaUrls, mediaItems, videos, caption = '', accountIds } = req.body || {};
   if (!['REELS', 'IMAGE', 'CAROUSEL'].includes(mediaType)) return res.status(400).json({ error: 'Choose Reels, Image, or Carousel.' });
   const hasVideoAssignments = mediaType === 'REELS' && videos !== undefined;
   let urls = [];
+  let carouselItems = [];
   let assignments = [];
   let requestedAccountIds = [];
   if (hasVideoAssignments) {
@@ -132,23 +133,40 @@ router.post('/publish', async (req, res, next) => {
     }
     requestedAccountIds = [...new Set(assignments.flatMap((video) => video.accountIds))];
   } else {
-    if (!Array.isArray(mediaUrls) || !Array.isArray(accountIds) || !accountIds.length) {
+    if ((mediaType === 'CAROUSEL' ? !Array.isArray(mediaItems) && !Array.isArray(mediaUrls) : !Array.isArray(mediaUrls))
+      || !Array.isArray(accountIds) || !accountIds.length) {
       return res.status(400).json({ error: 'Select media and at least one Instagram account.' });
     }
-    if ((mediaType === 'CAROUSEL' && (mediaUrls.length < 2 || mediaUrls.length > 10))
-      || (mediaType === 'REELS' && (mediaUrls.length < 1 || mediaUrls.length > 5))
+    if (mediaType === 'CAROUSEL') {
+      const items = Array.isArray(mediaItems) ? mediaItems : mediaUrls.map((mediaUrl) => ({ mediaUrl, mediaType: 'IMAGE' }));
+      if (items.length < 2 || items.length > 10) {
+        return res.status(400).json({ error: 'A carousel needs 2–10 images and/or videos.' });
+      }
+      try {
+        carouselItems = items.map((item) => {
+          if (!item || !['IMAGE', 'VIDEO'].includes(item.mediaType) || typeof item.mediaUrl !== 'string') {
+            throw new Error('Carousel items must be images or videos.');
+          }
+          return { mediaUrl: validatePublicMediaUrl(item.mediaUrl), mediaType: item.mediaType };
+        });
+      } catch (error) {
+        return res.status(400).json({ error: error.message });
+      }
+    }
+    if ((mediaType === 'REELS' && (mediaUrls.length < 1 || mediaUrls.length > 5))
       || (mediaType === 'IMAGE' && mediaUrls.length !== 1)) {
-      const error = mediaType === 'CAROUSEL' ? 'A carousel needs 2–10 images.'
-        : mediaType === 'REELS' ? 'Choose between 1 and 5 videos.'
-          : 'Choose exactly one image.';
+      const error = mediaType === 'REELS' ? 'Choose between 1 and 5 videos.'
+        : 'Choose exactly one image.';
       return res.status(400).json({ error });
     }
     if (accountIds.some((id) => typeof id !== 'string' || !id.trim())) {
       return res.status(400).json({ error: 'Select valid Instagram accounts.' });
     }
     if (new Set(accountIds).size !== accountIds.length) return res.status(400).json({ error: 'An account can only be selected once.' });
-    try { urls = mediaUrls.map(validatePublicMediaUrl); }
-    catch (error) { return res.status(400).json({ error: error.message }); }
+    if (mediaType !== 'CAROUSEL') {
+      try { urls = mediaUrls.map(validatePublicMediaUrl); }
+      catch (error) { return res.status(400).json({ error: error.message }); }
+    }
     requestedAccountIds = accountIds;
   }
   if (String(caption).length > 2200) return res.status(400).json({ error: 'Caption exceeds 2200 characters.' });
@@ -166,16 +184,23 @@ router.post('/publish', async (req, res, next) => {
     ? assignments.flatMap((video) => video.accountIds.map((accountId) => ({
       connection: connectionsById.get(accountId),
       mediaIndex: video.mediaIndex,
-      mediaUrls: [video.mediaUrl],
+      mediaItems: [{ mediaUrl: video.mediaUrl, mediaType: 'VIDEO' }],
     })))
-    : connections.flatMap((connection) => (mediaType === 'REELS' ? urls.map((url) => [url]) : [urls])
-      .map((postUrls, index) => ({ connection, mediaIndex: index + 1, mediaUrls: postUrls })));
+    : connections.flatMap((connection) => (mediaType === 'REELS' ? urls.map((mediaUrl) => [mediaUrl]) : [mediaType === 'CAROUSEL' ? carouselItems : urls])
+      .map((items, index) => ({
+        connection,
+        mediaIndex: index + 1,
+        mediaItems: mediaType === 'CAROUSEL' ? items : items.map((mediaUrl) => ({
+          mediaUrl,
+          mediaType: mediaType === 'REELS' ? 'VIDEO' : 'IMAGE',
+        })),
+      })));
 
   publishingSessions.add(session.sid);
   resetDebug(session);
   const results = [];
   try {
-    for (const { connection, mediaIndex, mediaUrls } of jobs) {
+    for (const { connection, mediaIndex, mediaItems: jobMediaItems } of jobs) {
       const result = {
         accountId: connection.igUserId,
         username: connection.username,
@@ -189,7 +214,7 @@ router.post('/publish', async (req, res, next) => {
       try {
         session.debug.stage = 'creating_container';
         log(session, `Creating ${mediaType}${mediaType === 'REELS' ? ` video ${mediaIndex}` : ''} for @${connection.username}`);
-        const { id: containerId } = await createContainer(connection, mediaType, mediaUrls, String(caption), session);
+        const { id: containerId } = await createContainer(connection, mediaType, jobMediaItems, String(caption), session);
         log(session, `Container created: ${containerId}`);
         session.debug.stage = 'processing';
         await waitForContainer(session, connection, containerId);

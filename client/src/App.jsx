@@ -15,7 +15,7 @@ const api = async (path, opts = {}) => {
 const mediaTypes = [
   { id: 'REELS', label: 'Reels', accept: 'video/*', multiple: true, help: 'Choose up to 5 videos. Each publishes as a separate Reel.' },
   { id: 'IMAGE', label: 'Image', accept: 'image/*', multiple: false, help: 'Choose one image file.' },
-  { id: 'CAROUSEL', label: 'Carousel', accept: 'image/*', multiple: true, help: 'Choose 2–10 images.' },
+  { id: 'CAROUSEL', label: 'Carousel', accept: 'image/*,video/*', multiple: true, help: 'Choose 2–10 images and/or videos.' },
 ];
 
 function saveCsv(filename, rows) {
@@ -125,11 +125,21 @@ export default function App() {
       setMessage({ type: 'error', text: 'Choose no more than 5 videos at a time.' });
       return;
     }
-    const expectedType = mediaType === 'REELS' ? 'video/' : 'image/';
-    if (selected.some((file) => !file.type.startsWith(expectedType))) {
+    if (mediaType === 'CAROUSEL' && (selected.length < 2 || selected.length > 10)) {
       setFiles([]);
       setVideoAccounts([]);
-      setMessage({ type: 'error', text: `Choose ${mediaType === 'REELS' ? 'video' : 'image'} files for this post type.` });
+      setMessage({ type: 'error', text: 'Choose between 2 and 10 carousel items.' });
+      return;
+    }
+    const isValidType = (file) => mediaType === 'CAROUSEL'
+      ? file.type.startsWith('image/') || file.type.startsWith('video/')
+      : file.type.startsWith(mediaType === 'REELS' ? 'video/' : 'image/');
+    if (selected.some((file) => !isValidType(file))) {
+      setFiles([]);
+      setVideoAccounts([]);
+      setMessage({ type: 'error', text: mediaType === 'CAROUSEL'
+        ? 'Choose image or video files for this carousel.'
+        : `Choose ${mediaType === 'REELS' ? 'video' : 'image'} files for this post type.` });
       return;
     }
     setFiles(selected);
@@ -171,7 +181,9 @@ export default function App() {
       const mediaUrls = await Promise.all(files.map(uploadFile));
       const payload = mediaType === 'REELS'
         ? { mediaType, videos: mediaUrls.map((mediaUrl, index) => ({ mediaUrl, accountIds: videoAccounts[index] })), caption }
-        : { mediaType, mediaUrls, caption, accountIds: selectedAccounts };
+        : mediaType === 'CAROUSEL'
+          ? { mediaType, mediaItems: mediaUrls.map((mediaUrl, index) => ({ mediaUrl, mediaType: files[index].type.startsWith('video/') ? 'VIDEO' : 'IMAGE' })), caption, accountIds: selectedAccounts }
+          : { mediaType, mediaUrls, caption, accountIds: selectedAccounts };
       const response = await api('/api/instagram/publish', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -268,11 +280,11 @@ export default function App() {
             <div className="composer-main">
               <section className="content-card">
                 <div className="section-title"><span className="step">01</span><div><h2>Choose a format</h2><p className="muted">Select the kind of post you want to share.</p></div></div>
-                <div className="format-options">{mediaTypes.map((type) => <button type="button" key={type.id} className={`format-option ${mediaType === type.id ? 'selected' : ''}`} onClick={() => { setMediaType(type.id); setFiles([]); setVideoAccounts([]); }}><span className="format-icon">{type.id === 'REELS' ? '▶' : type.id === 'IMAGE' ? '▧' : '▦'}</span><span><strong>{type.label}</strong><small>{type.id === 'REELS' ? 'Short-form video' : type.id === 'IMAGE' ? 'Single photo' : 'Multiple photos'}</small></span>{mediaType === type.id && <span className="radio-dot" />}</button>)}</div>
+                <div className="format-options">{mediaTypes.map((type) => <button type="button" key={type.id} className={`format-option ${mediaType === type.id ? 'selected' : ''}`} onClick={() => { setMediaType(type.id); setFiles([]); setVideoAccounts([]); }}><span className="format-icon">{type.id === 'REELS' ? '▶' : type.id === 'IMAGE' ? '▧' : '▦'}</span><span><strong>{type.label}</strong><small>{type.id === 'REELS' ? 'Short-form video' : type.id === 'IMAGE' ? 'Single photo' : 'Mixed-media carousel'}</small></span>{mediaType === type.id && <span className="radio-dot" />}</button>)}</div>
               </section>
               <section className="content-card">
                 <div className="section-title"><span className="step">02</span><div><h2>Add your media</h2><p className="muted">Files are securely uploaded to Cloudinary before publishing.</p></div></div>
-                <label className="upload-zone"><input type="file" accept={media.accept} multiple={media.multiple} onChange={(event) => { selectFiles(event.target.files); event.target.value = ''; }} /><span className="upload-icon">↑</span><strong>Choose {mediaType === 'CAROUSEL' ? 'images' : mediaType === 'REELS' ? 'videos' : 'an image'}</strong><span className="muted">{media.help}</span><span className="upload-link">Browse files</span></label>
+                <label className="upload-zone"><input type="file" accept={media.accept} multiple={media.multiple} onChange={(event) => { selectFiles(event.target.files); event.target.value = ''; }} /><span className="upload-icon">↑</span><strong>Choose {mediaType === 'CAROUSEL' ? 'images and/or videos' : mediaType === 'REELS' ? 'videos' : 'an image'}</strong><span className="muted">{media.help}</span><span className="upload-link">Browse files</span></label>
                 {mediaType === 'REELS' && selectedFiles.length > 0 ? (
                   <div className="video-assignments">
                     {selectedFiles.map((file, videoIndex) => {
@@ -294,7 +306,7 @@ export default function App() {
                       );
                     })}
                   </div>
-                ) : selectedFiles.length > 0 && <ul className="file-list">{selectedFiles.map((file, index) => <li key={`${file.name}-${file.size}-${index}`}>▧ <span>{file.name}</span><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></li>)}</ul>}
+                ) : selectedFiles.length > 0 && <ul className="file-list">{selectedFiles.map((file, index) => <li key={`${file.name}-${file.size}-${index}`}>{file.type.startsWith('video/') ? '▶' : '▧'} <span>{file.name}</span><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></li>)}</ul>}
               </section>
               <section className="content-card">
                 <div className="section-title"><span className="step">03</span><div><h2>Write a caption</h2><p className="muted">Share the story behind your post.</p></div></div>
