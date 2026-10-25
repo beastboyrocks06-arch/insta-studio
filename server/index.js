@@ -6,12 +6,21 @@ import authRoutes, { handleOAuthCallback } from './routes/auth.js';
 import instagramRoutes from './routes/instagram.js';
 import mediaRoutes from './routes/media.js';
 import { asyncRoute, requireAuth } from './session.js';
+import { redact } from './services/meta.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const app = express();
 
 app.set('trust proxy', 1);
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  console.info(`[request] ${req.method} ${req.path}`);
+  res.on('finish', () => {
+    console.info(`[response] ${req.method} ${req.path} ${res.statusCode} ${Date.now() - startedAt}ms`);
+  });
+  next();
+});
 app.use(express.json({ limit: '50kb' }));
 app.use(cookieParser());
 
@@ -26,7 +35,14 @@ app.use('/api', (req, res) => {
 });
 
 app.use((error, req, res, next) => {
-  console.error('Request failed:', error.code || error.name);
+  console.error('[error]', JSON.stringify({
+    method: req.method,
+    path: req.path,
+    status: Number.isInteger(error.status) && error.status >= 400 ? error.status : 500,
+    stage: error.stage,
+    code: error.code,
+    message: redact(error.message || error.name || 'Unknown error'),
+  }));
   if (res.headersSent) return next(error);
   if (error.code === '3D000') {
     return res.status(503).json({

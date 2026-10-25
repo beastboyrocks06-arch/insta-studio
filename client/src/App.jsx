@@ -39,6 +39,7 @@ export default function App() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [mediaType, setMediaType] = useState('REELS');
   const [files, setFiles] = useState([]);
+  const [videoAccounts, setVideoAccounts] = useState([]);
   const [caption, setCaption] = useState('');
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [publishing, setPublishing] = useState(false);
@@ -51,6 +52,7 @@ export default function App() {
     const next = await api('/api/auth/status');
     setStatus(next);
     setSelectedAccounts((current) => current.filter((id) => next.accounts.some((account) => account.id === id)));
+    setVideoAccounts((current) => current.map((ids) => ids.filter((id) => next.accounts.some((account) => account.id === id))));
   }, []);
 
   useEffect(() => {
@@ -105,20 +107,33 @@ export default function App() {
     setSelectedAccounts((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   }
 
+  function toggleVideoAccount(videoIndex, id) {
+    setVideoAccounts((current) => current.map((accountIds, index) => index !== videoIndex
+      ? accountIds
+      : accountIds.includes(id) ? accountIds.filter((value) => value !== id) : [...accountIds, id]));
+  }
+
+  function setVideoAccountsForAll(videoIndex, accountIds) {
+    setVideoAccounts((current) => current.map((selected, index) => index === videoIndex ? accountIds : selected));
+  }
+
   function selectFiles(fileList) {
     const selected = Array.from(fileList || []);
     if (mediaType === 'REELS' && selected.length > 5) {
       setFiles([]);
+      setVideoAccounts([]);
       setMessage({ type: 'error', text: 'Choose no more than 5 videos at a time.' });
       return;
     }
     const expectedType = mediaType === 'REELS' ? 'video/' : 'image/';
     if (selected.some((file) => !file.type.startsWith(expectedType))) {
       setFiles([]);
+      setVideoAccounts([]);
       setMessage({ type: 'error', text: `Choose ${mediaType === 'REELS' ? 'video' : 'image'} files for this post type.` });
       return;
     }
     setFiles(selected);
+    setVideoAccounts(mediaType === 'REELS' ? selected.map(() => [...selectedAccounts]) : []);
     setMessage(null);
   }
 
@@ -145,15 +160,21 @@ export default function App() {
 
   async function publish(event) {
     event.preventDefault();
-    if (!files.length || !selectedAccounts.length) return;
+    const hasPublishTargets = mediaType === 'REELS'
+      ? videoAccounts.length === files.length && videoAccounts.every((accountIds) => accountIds.length > 0)
+      : selectedAccounts.length > 0;
+    if (!files.length || !hasPublishTargets) return;
     setPublishing(true);
     setResults([]);
     setMessage({ type: 'info', text: 'Uploading media and publishing to the selected accounts…' });
     try {
-      const mediaUrls = await Promise.all(Array.from(files).map(uploadFile));
+      const mediaUrls = await Promise.all(files.map(uploadFile));
+      const payload = mediaType === 'REELS'
+        ? { mediaType, videos: mediaUrls.map((mediaUrl, index) => ({ mediaUrl, accountIds: videoAccounts[index] })), caption }
+        : { mediaType, mediaUrls, caption, accountIds: selectedAccounts };
       const response = await api('/api/instagram/publish', {
         method: 'POST',
-        body: JSON.stringify({ mediaType, mediaUrls, caption, accountIds: selectedAccounts }),
+        body: JSON.stringify(payload),
       });
       setResults(response.results);
       const successes = response.results.filter((result) => result.ok);
@@ -195,7 +216,12 @@ export default function App() {
 
   const media = mediaTypes.find((type) => type.id === mediaType);
   const selectedFiles = Array.from(files);
-  const canPublish = !publishing && selectedAccounts.length > 0 && selectedFiles.length > 0
+  const videoAssignmentsComplete = videoAccounts.length === selectedFiles.length
+    && videoAccounts.every((accountIds) => accountIds.length > 0);
+  const publishTargetCount = mediaType === 'REELS'
+    ? videoAccounts.reduce((total, accountIds) => total + accountIds.length, 0)
+    : selectedAccounts.length;
+  const canPublish = !publishing && (mediaType === 'REELS' ? videoAssignmentsComplete : selectedAccounts.length > 0) && selectedFiles.length > 0
     && (mediaType === 'REELS' ? selectedFiles.length <= 5
       : mediaType !== 'CAROUSEL' || (selectedFiles.length >= 2 && selectedFiles.length <= 10));
   const historyParams = new URLSearchParams();
@@ -242,12 +268,33 @@ export default function App() {
             <div className="composer-main">
               <section className="content-card">
                 <div className="section-title"><span className="step">01</span><div><h2>Choose a format</h2><p className="muted">Select the kind of post you want to share.</p></div></div>
-                <div className="format-options">{mediaTypes.map((type) => <button type="button" key={type.id} className={`format-option ${mediaType === type.id ? 'selected' : ''}`} onClick={() => { setMediaType(type.id); setFiles([]); }}><span className="format-icon">{type.id === 'REELS' ? '▶' : type.id === 'IMAGE' ? '▧' : '▦'}</span><span><strong>{type.label}</strong><small>{type.id === 'REELS' ? 'Short-form video' : type.id === 'IMAGE' ? 'Single photo' : 'Multiple photos'}</small></span>{mediaType === type.id && <span className="radio-dot" />}</button>)}</div>
+                <div className="format-options">{mediaTypes.map((type) => <button type="button" key={type.id} className={`format-option ${mediaType === type.id ? 'selected' : ''}`} onClick={() => { setMediaType(type.id); setFiles([]); setVideoAccounts([]); }}><span className="format-icon">{type.id === 'REELS' ? '▶' : type.id === 'IMAGE' ? '▧' : '▦'}</span><span><strong>{type.label}</strong><small>{type.id === 'REELS' ? 'Short-form video' : type.id === 'IMAGE' ? 'Single photo' : 'Multiple photos'}</small></span>{mediaType === type.id && <span className="radio-dot" />}</button>)}</div>
               </section>
               <section className="content-card">
                 <div className="section-title"><span className="step">02</span><div><h2>Add your media</h2><p className="muted">Files are securely uploaded to Cloudinary before publishing.</p></div></div>
                 <label className="upload-zone"><input type="file" accept={media.accept} multiple={media.multiple} onChange={(event) => { selectFiles(event.target.files); event.target.value = ''; }} /><span className="upload-icon">↑</span><strong>Choose {mediaType === 'CAROUSEL' ? 'images' : mediaType === 'REELS' ? 'videos' : 'an image'}</strong><span className="muted">{media.help}</span><span className="upload-link">Browse files</span></label>
-                {selectedFiles.length > 0 && <ul className="file-list">{selectedFiles.map((file, index) => <li key={`${file.name}-${file.size}-${index}`}>▧ <span>{file.name}</span><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></li>)}</ul>}
+                {mediaType === 'REELS' && selectedFiles.length > 0 ? (
+                  <div className="video-assignments">
+                    {selectedFiles.map((file, videoIndex) => {
+                      const assignedAccounts = videoAccounts[videoIndex] || [];
+                      return (
+                        <div className="video-assignment" key={`${file.name}-${file.size}-${videoIndex}`}>
+                          <div className="video-assignment-heading"><strong>Video {videoIndex + 1}: {file.name}</strong><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></div>
+                          <div className="video-account-heading"><span>Select accounts for this video ({assignedAccounts.length})</span><button type="button" className="text-button" disabled={!status.accounts.length} onClick={() => setVideoAccountsForAll(videoIndex, assignedAccounts.length === status.accounts.length ? [] : status.accounts.map((account) => account.id))}>{assignedAccounts.length === status.accounts.length && status.accounts.length ? 'Clear' : 'Select all'}</button></div>
+                          {status.accounts.length ? (
+                            <div className="video-account-list">{status.accounts.map((account) => (
+                              <label className="account-choice" key={account.id}>
+                                <input type="checkbox" checked={assignedAccounts.includes(account.id)} onChange={() => toggleVideoAccount(videoIndex, account.id)} />
+                                <span className="account-avatar small">{account.username.slice(0, 1).toUpperCase()}</span>
+                                <span>@{account.username}</span>
+                              </label>
+                            ))}</div>
+                          ) : <div className="inline-empty">Connect an Instagram account before assigning this video.</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : selectedFiles.length > 0 && <ul className="file-list">{selectedFiles.map((file, index) => <li key={`${file.name}-${file.size}-${index}`}>▧ <span>{file.name}</span><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></li>)}</ul>}
               </section>
               <section className="content-card">
                 <div className="section-title"><span className="step">03</span><div><h2>Write a caption</h2><p className="muted">Share the story behind your post.</p></div></div>
@@ -256,15 +303,16 @@ export default function App() {
               </section>
             </div>
             <aside className="composer-side">
-              <section className="content-card account-picker">
+              {mediaType !== 'REELS' && <section className="content-card account-picker">
                 <div className="side-title"><div><span className="step">04</span><h2>Publish to</h2></div><button type="button" className="text-button" disabled={!status.accounts.length} onClick={() => setSelectedAccounts(selectedAccounts.length === status.accounts.length ? [] : status.accounts.map((account) => account.id))}>{selectedAccounts.length === status.accounts.length && status.accounts.length ? 'Clear' : 'Select all'}</button></div>
                 <p className="muted">Choose one or more accounts.</p>
                 {!status.accounts.length ? <div className="inline-empty">No accounts yet. <a href="/api/auth/instagram/login">Connect Instagram</a></div> : status.accounts.map((account) => <label className="account-choice" key={account.id}><input type="checkbox" checked={selectedAccounts.includes(account.id)} onChange={() => toggleAccount(account.id)} /><span className="account-avatar small">{account.username.slice(0, 1).toUpperCase()}</span><span>@{account.username}</span></label>)}
                 <div className="publish-divider" />
                 <button className="button primary full publish-button" disabled={!canPublish}>{publishing ? 'Publishing…' : 'Publish now'} <span>↗</span></button>
                 <p className="publish-note">Your post will be published to {selectedAccounts.length} {selectedAccounts.length === 1 ? 'account' : 'accounts'}.</p>
-              </section>
-              {results.length > 0 && <section className="content-card publish-results"><h2>Publish results</h2>{results.map((result) => <div key={`${result.accountId}-${result.mediaIndex}`} className="result-row"><span className={result.ok ? 'result-ok' : 'result-fail'}>{result.ok ? '✓' : '!'}</span><span>@{result.username}{mediaType === 'REELS' && selectedFiles.length > 1 ? ` · Video ${result.mediaIndex}` : ''}</span>{result.postUrl && <a href={result.postUrl} target="_blank" rel="noreferrer">View post ↗</a>}<small>{result.error || ''}</small></div>)}</section>}
+              </section>}
+              {mediaType === 'REELS' && <section className="content-card account-picker"><p className="muted">{publishTargetCount} total video-to-account assignment{publishTargetCount === 1 ? '' : 's'}. Assign each video to at least one account.</p><div className="publish-divider" /><button className="button primary full publish-button" disabled={!canPublish}>{publishing ? 'Publishing…' : 'Publish now'} <span>↗</span></button></section>}
+              {results.length > 0 && <section className="content-card publish-results"><h2>Publish results</h2>{results.map((result) => <div key={`${result.accountId}-${result.mediaIndex}`} className="result-row"><span className={result.ok ? 'result-ok' : 'result-fail'}>{result.ok ? '✓' : '!'}</span><span>@{result.username}{mediaType === 'REELS' ? ` · Video ${result.mediaIndex}` : ''}</span>{result.postUrl && <a href={result.postUrl} target="_blank" rel="noreferrer">View post ↗</a>}<small>{result.error || ''}</small></div>)}</section>}
             </aside>
           </form>
         )}

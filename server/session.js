@@ -25,7 +25,10 @@ export async function replaceSession(req, res, session) {
 }
 
 export function resetDebug(session) { session.debug = freshDebug(); }
-export function log(session, message) { session.debug.log.push({ t: new Date().toISOString(), msg: message }); }
+export function log(session, message) {
+  session.debug.log.push({ t: new Date().toISOString(), msg: message });
+  console.info(`[publish] ${message}`);
+}
 
 export function requireAuth(req, res, next) {
   getSession(req, res).then((session) => {

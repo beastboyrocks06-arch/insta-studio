@@ -102,85 +102,123 @@ router.get('/history.csv', async (req, res, next) => {
 router.post('/publish', async (req, res, next) => {
   const session = req.appSession;
   if (publishingSessions.has(session.sid)) return res.status(409).json({ error: 'A publish is already in progress' });
-  const { mediaType, mediaUrls, caption = '', accountIds } = req.body || {};
+  const { mediaType, mediaUrls, videos, caption = '', accountIds } = req.body || {};
   if (!['REELS', 'IMAGE', 'CAROUSEL'].includes(mediaType)) return res.status(400).json({ error: 'Choose Reels, Image, or Carousel.' });
-  if (!Array.isArray(mediaUrls) || !Array.isArray(accountIds) || !accountIds.length) {
-    return res.status(400).json({ error: 'Select media and at least one Instagram account.' });
-  }
-  if ((mediaType === 'CAROUSEL' && (mediaUrls.length < 2 || mediaUrls.length > 10))
+  const hasVideoAssignments = mediaType === 'REELS' && videos !== undefined;
+  let urls = [];
+  let assignments = [];
+  let requestedAccountIds = [];
+  if (hasVideoAssignments) {
+    if (!Array.isArray(videos) || videos.length < 1 || videos.length > 5) {
+      return res.status(400).json({ error: 'Choose between 1 and 5 videos.' });
+    }
+    try {
+      assignments = videos.map((video, index) => {
+        if (!video || typeof video.mediaUrl !== 'string' || !Array.isArray(video.accountIds) || !video.accountIds.length
+          || video.accountIds.some((id) => typeof id !== 'string' || !id.trim())) {
+          throw new Error(`Assign video ${index + 1} to at least one Instagram account.`);
+        }
+        if (new Set(video.accountIds).size !== video.accountIds.length) {
+          throw new Error(`An account can only be selected once for video ${index + 1}.`);
+        }
+        return {
+          mediaIndex: index + 1,
+          mediaUrl: validatePublicMediaUrl(video.mediaUrl),
+          accountIds: video.accountIds,
+        };
+      });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    requestedAccountIds = [...new Set(assignments.flatMap((video) => video.accountIds))];
+  } else {
+    if (!Array.isArray(mediaUrls) || !Array.isArray(accountIds) || !accountIds.length) {
+      return res.status(400).json({ error: 'Select media and at least one Instagram account.' });
+    }
+    if ((mediaType === 'CAROUSEL' && (mediaUrls.length < 2 || mediaUrls.length > 10))
       || (mediaType === 'REELS' && (mediaUrls.length < 1 || mediaUrls.length > 5))
       || (mediaType === 'IMAGE' && mediaUrls.length !== 1)) {
-    const error = mediaType === 'CAROUSEL' ? 'A carousel needs 2–10 images.'
-      : mediaType === 'REELS' ? 'Choose between 1 and 5 videos.'
-        : 'Choose exactly one image.';
-    return res.status(400).json({ error });
+      const error = mediaType === 'CAROUSEL' ? 'A carousel needs 2–10 images.'
+        : mediaType === 'REELS' ? 'Choose between 1 and 5 videos.'
+          : 'Choose exactly one image.';
+      return res.status(400).json({ error });
+    }
+    if (accountIds.some((id) => typeof id !== 'string' || !id.trim())) {
+      return res.status(400).json({ error: 'Select valid Instagram accounts.' });
+    }
+    if (new Set(accountIds).size !== accountIds.length) return res.status(400).json({ error: 'An account can only be selected once.' });
+    try { urls = mediaUrls.map(validatePublicMediaUrl); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+    requestedAccountIds = accountIds;
   }
   if (String(caption).length > 2200) return res.status(400).json({ error: 'Caption exceeds 2200 characters.' });
-  if (new Set(accountIds).size !== accountIds.length) return res.status(400).json({ error: 'An account can only be selected once.' });
 
-  let urls;
-  try { urls = mediaUrls.map(validatePublicMediaUrl); }
-  catch (error) { return res.status(400).json({ error: error.message }); }
   let connections;
   try {
-    const byId = new Map((await findAccounts(accountIds)).map((connection) => [connection.igUserId, connection]));
-    connections = accountIds.map((id) => byId.get(String(id)));
+    const byId = new Map((await findAccounts(requestedAccountIds)).map((connection) => [connection.igUserId, connection]));
+    connections = requestedAccountIds.map((id) => byId.get(String(id)));
   } catch (error) {
     return next(error);
   }
   if (connections.some((connection) => !connection)) return res.status(400).json({ error: 'One or more selected accounts are no longer connected. Refresh and try again.' });
+  const connectionsById = new Map(connections.map((connection) => [connection.igUserId, connection]));
+  const jobs = hasVideoAssignments
+    ? assignments.flatMap((video) => video.accountIds.map((accountId) => ({
+      connection: connectionsById.get(accountId),
+      mediaIndex: video.mediaIndex,
+      mediaUrls: [video.mediaUrl],
+    })))
+    : connections.flatMap((connection) => (mediaType === 'REELS' ? urls.map((url) => [url]) : [urls])
+      .map((postUrls, index) => ({ connection, mediaIndex: index + 1, mediaUrls: postUrls })));
 
   publishingSessions.add(session.sid);
   resetDebug(session);
   const results = [];
   try {
-    for (const connection of connections) {
-      const posts = mediaType === 'REELS' ? urls.map((url) => [url]) : [urls];
-      for (const [index, postUrls] of posts.entries()) {
-        const result = {
-          accountId: connection.igUserId,
-          username: connection.username,
-          mediaType,
-          mediaIndex: index + 1,
-          ok: false,
-          postUrl: '',
-          mediaId: '',
-          error: '',
-        };
+    for (const { connection, mediaIndex, mediaUrls } of jobs) {
+      const result = {
+        accountId: connection.igUserId,
+        username: connection.username,
+        mediaType,
+        mediaIndex,
+        ok: false,
+        postUrl: '',
+        mediaId: '',
+        error: '',
+      };
+      try {
+        session.debug.stage = 'creating_container';
+        log(session, `Creating ${mediaType}${mediaType === 'REELS' ? ` video ${mediaIndex}` : ''} for @${connection.username}`);
+        const { id: containerId } = await createContainer(connection, mediaType, mediaUrls, String(caption), session);
+        log(session, `Container created: ${containerId}`);
+        session.debug.stage = 'processing';
+        await waitForContainer(session, connection, containerId);
+        session.debug.stage = 'publishing';
+        const published = await publishContainer(connection, containerId);
+        result.mediaId = published.id;
+        result.ok = true;
+        session.debug.stage = 'published';
         try {
-          session.debug.stage = 'creating_container';
-          log(session, `Creating ${mediaType}${mediaType === 'REELS' ? ` ${index + 1}/${posts.length}` : ''} for @${connection.username}`);
-          const { id: containerId } = await createContainer(connection, mediaType, postUrls, String(caption), session);
-          log(session, `Container created: ${containerId}`);
-          session.debug.stage = 'processing';
-          await waitForContainer(session, connection, containerId);
-          session.debug.stage = 'publishing';
-          const published = await publishContainer(connection, containerId);
-          result.mediaId = published.id;
-          result.ok = true;
-          session.debug.stage = 'published';
-          try {
-            const media = await getMediaPermalink(connection, published.id);
-            result.postUrl = media.permalink || '';
-          } catch (error) {
-            log(session, `Could not retrieve permalink for @${connection.username}: ${redact(error.message)}`);
-          }
-          try {
-            const record = await recordPublishedPost(result);
-            result.date = record.publishedAt instanceof Date ? record.publishedAt.toISOString() : record.publishedAt;
-          } catch (error) {
-            result.error = `Published, but failed to save the post in Neon: ${redact(error.message)}`;
-            log(session, result.error);
-          }
-          log(session, `Published @${connection.username}: ${result.postUrl || `media ${result.mediaId}`}`);
+          const media = await getMediaPermalink(connection, published.id);
+          result.postUrl = media.permalink || '';
         } catch (error) {
-          result.error = redact(error.message);
-          session.debug.stage = 'failed';
-          session.debug.error = result.error;
-          log(session, `Publish failed for @${connection.username}: ${result.error}`);
+          log(session, `Could not retrieve permalink for @${connection.username}: ${redact(error.message)}`);
         }
-        results.push(result);
+        try {
+          const record = await recordPublishedPost(result);
+          result.date = record.publishedAt instanceof Date ? record.publishedAt.toISOString() : record.publishedAt;
+        } catch (error) {
+          result.error = `Published, but failed to save the post in Neon: ${redact(error.message)}`;
+          log(session, result.error);
+        }
+        log(session, `Published @${connection.username}: ${result.postUrl || `media ${result.mediaId}`}`);
+      } catch (error) {
+        result.error = redact(error.message);
+        session.debug.stage = 'failed';
+        session.debug.error = result.error;
+        log(session, `Publish failed for @${connection.username}: ${result.error}`);
       }
+      results.push(result);
     }
     session.debug.result = results.map(({ username, ok, mediaId, postUrl, error }) => ({ username, ok, mediaId, postUrl, error }));
     res.json({ ok: results.every((result) => result.ok), results });
