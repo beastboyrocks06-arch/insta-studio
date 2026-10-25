@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import { config, configProblems } from './config.js';
 import authRoutes from './routes/auth.js';
 import instagramRoutes from './routes/instagram.js';
+import mediaRoutes from './routes/media.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +16,7 @@ app.use(cookieParser());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/instagram', instagramRoutes);
+app.use('/api/media', mediaRoutes);
 
 // API fallback
 app.use('/api', (req, res) => {

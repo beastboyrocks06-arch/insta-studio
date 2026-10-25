@@ -16,6 +16,11 @@ export const config = {
   backendUrl: e.BACKEND_URL || 'http://localhost:5000',
   appId: e.META_APP_ID,
   appSecret: e.META_APP_SECRET,
+  appUsername: e.APP_USERNAME,
+  appPassword: e.APP_PASSWORD,
+  cloudinaryCloudName: e.CLOUDINARY_CLOUD_NAME,
+  cloudinaryApiKey: e.CLOUDINARY_API_KEY,
+  cloudinaryApiSecret: e.CLOUDINARY_API_SECRET,
   redirectUri: e.META_REDIRECT_URI || 'http://localhost:5000/api/auth/callback',
   loginType,
   version: e.META_GRAPH_API_VERSION || 'v21.0',
@@ -36,4 +41,15 @@ export function configProblems() {
     if (config.loginType === 'facebook' && igScopes) p.push('Facebook Login cannot use instagram_business_* scopes');
   }
   return p;
+}
+
+export function authConfigProblems() {
+  const problems = [];
+  if (!config.appUsername) problems.push('APP_USERNAME is missing');
+  if (!config.appPassword) problems.push('APP_PASSWORD is missing');
+  return problems;
+}
+
+export function cloudinaryConfigured() {
+  return Boolean(config.cloudinaryCloudName && config.cloudinaryApiKey && config.cloudinaryApiSecret);
 }

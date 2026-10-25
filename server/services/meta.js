@@ -89,3 +89,25 @@ export const getContainerStatus = (conn, containerId) =>
 
 export const publishContainer = (conn, containerId) =>
   call(base(`${conn.igUserId}/media_publish`), form({ creation_id: containerId, access_token: conn.accessToken }), 'publish');
+
+export const createImageContainer = (conn, imageUrl, caption) =>
+  call(base(`${conn.igUserId}/media`), form({ image_url: imageUrl, caption, access_token: conn.accessToken }), 'create_container');
+
+export const createCarouselItem = (conn, mediaUrl, mediaType) =>
+  call(base(`${conn.igUserId}/media`), form({
+    [mediaType === 'REELS' ? 'video_url' : 'image_url']: mediaUrl,
+    ...(mediaType === 'REELS' ? { media_type: 'VIDEO' } : {}),
+    is_carousel_item: 'true',
+    access_token: conn.accessToken,
+  }), 'create_carousel_item');
+
+export const createCarouselContainer = (conn, childIds, caption) =>
+  call(base(`${conn.igUserId}/media`), form({
+    media_type: 'CAROUSEL',
+    children: childIds.join(','),
+    caption,
+    access_token: conn.accessToken,
+  }), 'create_container');
+
+export const getMediaPermalink = (conn, mediaId) =>
+  call(`${base(mediaId)}?${qs({ fields: 'permalink', access_token: conn.accessToken })}`, {}, 'media_permalink');
