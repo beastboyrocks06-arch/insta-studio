@@ -105,33 +105,38 @@ router.post('/publish', async (req, res, next) => {
   const { mediaType, mediaUrls, mediaItems, videos, caption = '', accountIds } = req.body || {};
   if (!['REELS', 'IMAGE', 'CAROUSEL'].includes(mediaType)) return res.status(400).json({ error: 'Choose Reels, Image, or Carousel.' });
   const hasVideoAssignments = mediaType === 'REELS' && videos !== undefined;
+  const hasImageAssignments = mediaType === 'IMAGE' && req.body?.images !== undefined;
+  const hasMediaAssignments = hasVideoAssignments || hasImageAssignments;
   let urls = [];
   let carouselItems = [];
   let assignments = [];
   let requestedAccountIds = [];
-  if (hasVideoAssignments) {
-    if (!Array.isArray(videos) || videos.length < 1 || videos.length > 5) {
-      return res.status(400).json({ error: 'Choose between 1 and 5 videos.' });
+  if (hasMediaAssignments) {
+    const mediaAssignments = hasVideoAssignments ? videos : req.body.images;
+    const maxCount = hasVideoAssignments ? 5 : 10;
+    const mediaLabel = hasVideoAssignments ? 'videos' : 'images';
+    if (!Array.isArray(mediaAssignments) || mediaAssignments.length < 1 || mediaAssignments.length > maxCount) {
+      return res.status(400).json({ error: `Choose between 1 and ${maxCount} ${mediaLabel}.` });
     }
     try {
-      assignments = videos.map((video, index) => {
-        if (!video || typeof video.mediaUrl !== 'string' || !Array.isArray(video.accountIds) || !video.accountIds.length
-          || video.accountIds.some((id) => typeof id !== 'string' || !id.trim())) {
-          throw new Error(`Assign video ${index + 1} to at least one Instagram account.`);
+      assignments = mediaAssignments.map((item, index) => {
+        if (!item || typeof item.mediaUrl !== 'string' || !Array.isArray(item.accountIds) || !item.accountIds.length
+          || item.accountIds.some((id) => typeof id !== 'string' || !id.trim())) {
+          throw new Error(`Assign ${hasVideoAssignments ? 'video' : 'image'} ${index + 1} to at least one Instagram account.`);
         }
-        if (new Set(video.accountIds).size !== video.accountIds.length) {
-          throw new Error(`An account can only be selected once for video ${index + 1}.`);
+        if (new Set(item.accountIds).size !== item.accountIds.length) {
+          throw new Error(`An account can only be selected once for ${hasVideoAssignments ? 'video' : 'image'} ${index + 1}.`);
         }
         return {
           mediaIndex: index + 1,
-          mediaUrl: validatePublicMediaUrl(video.mediaUrl),
-          accountIds: video.accountIds,
+          mediaUrl: validatePublicMediaUrl(item.mediaUrl),
+          accountIds: item.accountIds,
         };
       });
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
-    requestedAccountIds = [...new Set(assignments.flatMap((video) => video.accountIds))];
+    requestedAccountIds = [...new Set(assignments.flatMap((item) => item.accountIds))];
   } else {
     if ((mediaType === 'CAROUSEL' ? !Array.isArray(mediaItems) && !Array.isArray(mediaUrls) : !Array.isArray(mediaUrls))
       || !Array.isArray(accountIds) || !accountIds.length) {
@@ -180,11 +185,11 @@ router.post('/publish', async (req, res, next) => {
   }
   if (connections.some((connection) => !connection)) return res.status(400).json({ error: 'One or more selected accounts are no longer connected. Refresh and try again.' });
   const connectionsById = new Map(connections.map((connection) => [connection.igUserId, connection]));
-  const jobs = hasVideoAssignments
-    ? assignments.flatMap((video) => video.accountIds.map((accountId) => ({
+  const jobs = hasMediaAssignments
+    ? assignments.flatMap((item) => item.accountIds.map((accountId) => ({
       connection: connectionsById.get(accountId),
-      mediaIndex: video.mediaIndex,
-      mediaItems: [{ mediaUrl: video.mediaUrl, mediaType: 'VIDEO' }],
+      mediaIndex: item.mediaIndex,
+      mediaItems: [{ mediaUrl: item.mediaUrl, mediaType: hasVideoAssignments ? 'VIDEO' : 'IMAGE' }],
     })))
     : connections.flatMap((connection) => (mediaType === 'REELS' ? urls.map((mediaUrl) => [mediaUrl]) : [mediaType === 'CAROUSEL' ? carouselItems : urls])
       .map((items, index) => ({
