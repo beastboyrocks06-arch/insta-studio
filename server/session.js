@@ -1,27 +1,40 @@
 import crypto from 'node:crypto';
-// In-memory only: everything here is lost when the server restarts.
-const sessions = new Map();
+import { findSession, removeSession, saveSession, sessionCookieOptions } from './db.js';
+
 const freshDebug = () => ({ stage: 'idle', processing: null, log: [], result: null, error: null });
 
-export function getSession(req, res) {
+export async function getSession(req, res) {
   let sid = req.cookies?.sid;
-  if (!sid || !sessions.has(sid)) {
-    sid = crypto.randomBytes(24).toString('base64url');
-    sessions.set(sid, { authenticated: false, oauth: null, connections: new Map(), debug: freshDebug(), busy: false });
-    res.cookie('sid', sid, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 24 * 3600 * 1000,
-    });
+  let session = sid ? await findSession(sid) : null;
+  if (!session) {
+    sid = crypto.randomBytes(32).toString('base64url');
+    session = { sid, authenticated: false, oauth: null, debug: freshDebug() };
+    await saveSession(session);
+    res.cookie('sid', sid, sessionCookieOptions());
   }
-  return sessions.get(sid);
+  return session;
 }
-export function resetDebug(s) { s.debug = freshDebug(); }
-export function log(s, msg) { s.debug.log.push({ t: new Date().toISOString(), msg }); }
+
+export async function replaceSession(req, res, session) {
+  await removeSession(session.sid);
+  const sid = crypto.randomBytes(32).toString('base64url');
+  const authenticated = { sid, authenticated: true, oauth: null, debug: freshDebug() };
+  await saveSession(authenticated);
+  res.cookie('sid', sid, sessionCookieOptions());
+  return authenticated;
+}
+
+export function resetDebug(session) { session.debug = freshDebug(); }
+export function log(session, message) { session.debug.log.push({ t: new Date().toISOString(), msg: message }); }
+
 export function requireAuth(req, res, next) {
-  const session = getSession(req, res);
-  if (!session.authenticated) return res.status(401).json({ error: 'Authentication required' });
-  req.appSession = session;
-  next();
+  getSession(req, res).then((session) => {
+    if (!session.authenticated) return res.status(401).json({ error: 'Authentication required' });
+    req.appSession = session;
+    next();
+  }).catch(next);
+}
+
+export function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }

@@ -18,6 +18,7 @@ export const config = {
   appSecret: e.META_APP_SECRET,
   appUsername: e.APP_USERNAME,
   appPassword: e.APP_PASSWORD,
+  databaseUrl: e.DATABASE_URL,
   cloudinaryCloudName: e.CLOUDINARY_CLOUD_NAME,
   cloudinaryApiKey: e.CLOUDINARY_API_KEY,
   cloudinaryApiSecret: e.CLOUDINARY_API_SECRET,
@@ -47,6 +48,7 @@ export function authConfigProblems() {
   const problems = [];
   if (!config.appUsername) problems.push('APP_USERNAME is missing');
   if (!config.appPassword) problems.push('APP_PASSWORD is missing');
+  if (!config.databaseUrl) problems.push('DATABASE_URL is missing');
   return problems;
 }
 

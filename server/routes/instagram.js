@@ -1,9 +1,7 @@
 import { Router } from 'express';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
-import { getSession, log, requireAuth, resetDebug } from '../session.js';
+import { log, requireAuth, resetDebug } from '../session.js';
+import { findAccounts, getPublishedPosts, recordPublishedPost } from '../db.js';
 import {
   createCarouselContainer,
   createCarouselItem,
@@ -17,8 +15,8 @@ import {
 
 const router = Router();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const csvPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/published-posts.csv');
 const csvHeader = 'date,account,mediaType,postUrl,mediaId\r\n';
+const publishingSessions = new Set();
 router.use(requireAuth);
 
 function escapeCsv(value) {
@@ -64,34 +62,18 @@ async function createContainer(connection, mediaType, mediaUrls, caption, sessio
   return createCarouselContainer(connection, childIds, caption);
 }
 
-async function appendHistory(result, mediaType) {
-  const entry = [
-    new Date().toISOString(),
-    result.username,
-    mediaType,
-    result.postUrl,
-    result.mediaId,
-  ].map(escapeCsv).join(',') + '\r\n';
-  await fs.mkdir(path.dirname(csvPath), { recursive: true });
-  try {
-    await fs.access(csvPath);
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    await fs.writeFile(csvPath, csvHeader, 'utf8');
-  }
-  await fs.appendFile(csvPath, entry, 'utf8');
-}
-
-router.get('/debug', (req, res) => res.json(getSession(req, res).debug));
+router.get('/debug', (req, res) => res.json(req.appSession.debug));
 
 router.get('/history.csv', async (req, res, next) => {
   try {
-    let csv;
-    try { csv = await fs.readFile(csvPath, 'utf8'); }
-    catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      csv = csvHeader;
-    }
+    const posts = await getPublishedPosts();
+    const csv = [csvHeader.trimEnd(), ...posts.map((post) => [
+      post.date instanceof Date ? post.date.toISOString() : post.date,
+      post.account,
+      post.mediaType,
+      post.postUrl,
+      post.mediaId,
+    ].map(escapeCsv).join(','))].join('\r\n') + '\r\n';
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="instagram-published-posts.csv"');
     res.send(csv);
@@ -100,9 +82,9 @@ router.get('/history.csv', async (req, res, next) => {
   }
 });
 
-router.post('/publish', async (req, res) => {
+router.post('/publish', async (req, res, next) => {
   const session = req.appSession;
-  if (session.busy) return res.status(409).json({ error: 'A publish is already in progress' });
+  if (publishingSessions.has(session.sid)) return res.status(409).json({ error: 'A publish is already in progress' });
   const { mediaType, mediaUrls, caption = '', accountIds } = req.body || {};
   if (!['REELS', 'IMAGE', 'CAROUSEL'].includes(mediaType)) return res.status(400).json({ error: 'Choose Reel, Image, or Carousel.' });
   if (!Array.isArray(mediaUrls) || !Array.isArray(accountIds) || !accountIds.length) {
@@ -118,10 +100,16 @@ router.post('/publish', async (req, res) => {
   let urls;
   try { urls = mediaUrls.map(validatePublicMediaUrl); }
   catch (error) { return res.status(400).json({ error: error.message }); }
-  const connections = accountIds.map((id) => session.connections.get(String(id)));
+  let connections;
+  try {
+    const byId = new Map((await findAccounts(accountIds)).map((connection) => [connection.igUserId, connection]));
+    connections = accountIds.map((id) => byId.get(String(id)));
+  } catch (error) {
+    return next(error);
+  }
   if (connections.some((connection) => !connection)) return res.status(400).json({ error: 'One or more selected accounts are no longer connected. Refresh and try again.' });
 
-  session.busy = true;
+  publishingSessions.add(session.sid);
   resetDebug(session);
   const results = [];
   try {
@@ -146,9 +134,10 @@ router.post('/publish', async (req, res) => {
           log(session, `Could not retrieve permalink for @${connection.username}: ${redact(error.message)}`);
         }
         try {
-          await appendHistory(result, mediaType);
+          const record = await recordPublishedPost(result);
+          result.date = record.publishedAt instanceof Date ? record.publishedAt.toISOString() : record.publishedAt;
         } catch (error) {
-          result.error = `Published, but failed to write CSV history: ${redact(error.message)}`;
+          result.error = `Published, but failed to save the post in Neon: ${redact(error.message)}`;
           log(session, result.error);
         }
         log(session, `Published @${connection.username}: ${result.postUrl || `media ${result.mediaId}`}`);
@@ -162,8 +151,10 @@ router.post('/publish', async (req, res) => {
     }
     session.debug.result = results.map(({ username, ok, mediaId, postUrl, error }) => ({ username, ok, mediaId, postUrl, error }));
     res.json({ ok: results.every((result) => result.ok), results });
+  } catch (error) {
+    next(error);
   } finally {
-    session.busy = false;
+    publishingSessions.delete(session.sid);
   }
 });
 

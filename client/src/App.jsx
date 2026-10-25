@@ -32,6 +32,7 @@ function saveCsv(filename, rows) {
 
 export default function App() {
   const [status, setStatus] = useState(null);
+  const [statusError, setStatusError] = useState(null);
   const [page, setPage] = useState('posts');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -59,7 +60,7 @@ export default function App() {
       setMessage({ type: 'error', text: params.get('error') });
       window.history.replaceState({}, '', '/');
     }
-    loadStatus().catch((error) => setMessage({ type: 'error', text: error.message }));
+    loadStatus().catch((error) => setStatusError(error.message));
   }, [loadStatus]);
 
   async function login(event) {
@@ -151,7 +152,7 @@ export default function App() {
     }
   }
 
-  if (!status) return <main className="loading">Loading publisher…</main>;
+  if (!status) return <main className="loading">{statusError ? `Publisher unavailable: ${statusError}` : 'Loading publisher…'}</main>;
 
   if (!status.authenticated) {
     return (

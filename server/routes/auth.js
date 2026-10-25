@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { authConfigProblems, config, configProblems } from '../config.js';
-import { getSession, resetDebug, requireAuth } from '../session.js';
+import { asyncRoute, getSession, resetDebug, requireAuth } from '../session.js';
 import { authorizationUrl, completeLogin, redact } from '../services/meta.js';
+import { listAccounts, removeAccount, saveAccount, saveSession } from '../db.js';
+import { replaceSession } from '../session.js';
 
 const router = Router();
 const STATE_TTL_MS = 10 * 60 * 1000;
@@ -15,8 +17,8 @@ function secureEqual(actual, expected) {
   return crypto.timingSafeEqual(actualHash, expectedHash) && actual === expected;
 }
 
-router.get('/status', (req, res) => {
-  const s = getSession(req, res);
+router.get('/status', asyncRoute(async (req, res) => {
+  const s = await getSession(req, res);
   res.json({
     authenticated: s.authenticated,
     displayName: config.appUsername || 'Workspace owner',
@@ -26,16 +28,11 @@ router.get('/status', (req, res) => {
     graphVersion: config.version,
     redirectUri: config.redirectUri,
     requestedScopes: config.scopes,
-    accounts: [...s.connections.values()].map((connection) => ({
-      username: connection.username,
-      id: connection.igUserId,
-      permissions: connection.permissions,
-      expiresAt: connection.expiresAt,
-    })),
+    accounts: s.authenticated ? await listAccounts() : [],
   });
-});
+}));
 
-router.post('/login', (req, res) => {
+router.post('/login', asyncRoute(async (req, res) => {
   const problems = authConfigProblems();
   if (problems.length) return res.status(503).json({ error: `Server not configured: ${problems.join('; ')}` });
   const address = req.ip;
@@ -49,32 +46,34 @@ router.post('/login', (req, res) => {
     return res.status(401).json({ error: 'Incorrect username or password.' });
   }
   failures.delete(address);
-  getSession(req, res).authenticated = true;
+  const session = await getSession(req, res);
+  await replaceSession(req, res, session);
   res.json({ ok: true });
-});
+}));
 
-router.post('/logout', requireAuth, (req, res) => {
-  req.appSession.authenticated = false;
-  req.appSession.oauth = null;
-  req.appSession.connections.clear();
+router.post('/logout', requireAuth, asyncRoute(async (req, res) => {
+  await removeSession(req.appSession.sid);
+  res.clearCookie('sid', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
   resetDebug(req.appSession);
   res.json({ ok: true });
-});
+}));
 
-router.get('/instagram/login', requireAuth, (req, res) => {
+router.get('/instagram/login', requireAuth, asyncRoute(async (req, res) => {
   const problems = configProblems();
   if (problems.length) return back(res, { error: `Server not configured: ${problems.join('; ')}` });
   const s = req.appSession;
   const state = crypto.randomBytes(24).toString('base64url');
   s.oauth = { state, expires: Date.now() + STATE_TTL_MS };
+  await saveSession(s);
   res.redirect(authorizationUrl(state));
-});
+}));
 
 export async function handleOAuthCallback(req, res) {
   const s = req.appSession;
   const { code, state, error, error_description, error_reason } = req.query;
   const saved = s.oauth;
   s.oauth = null;
+  await saveSession(s);
   if (error) return back(res, { error: `Authorization cancelled or denied: ${error_description || error_reason || error}` });
   if (!saved || !state || typeof state !== 'string' || saved.state.length !== state.length
       || !crypto.timingSafeEqual(Buffer.from(saved.state), Buffer.from(state))) {
@@ -85,7 +84,7 @@ export async function handleOAuthCallback(req, res) {
   resetDebug(s);
   try {
     const result = await completeLogin(String(code).replace(/#_$/, ''));
-    s.connections.set(String(result.igUserId), { ...result, loginType: config.loginType });
+    await saveAccount({ ...result, loginType: config.loginType });
     result.notes.forEach((note) => s.debug.log.push({ t: new Date().toISOString(), msg: note }));
     back(res, { connected: '1' });
   } catch (err) {
@@ -93,12 +92,12 @@ export async function handleOAuthCallback(req, res) {
   }
 }
 
-router.get('/callback', requireAuth, handleOAuthCallback);
+router.get('/callback', requireAuth, asyncRoute(handleOAuthCallback));
 
-router.delete('/accounts/:id', requireAuth, (req, res) => {
-  const removed = req.appSession.connections.delete(req.params.id);
+router.delete('/accounts/:id', requireAuth, asyncRoute(async (req, res) => {
+  const removed = await removeAccount(req.params.id);
   if (!removed) return res.status(404).json({ error: 'Connected account not found' });
   res.json({ ok: true });
-});
+}));
 
 export default router;
