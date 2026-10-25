@@ -13,7 +13,7 @@ const api = async (path, opts = {}) => {
 };
 
 const mediaTypes = [
-  { id: 'REELS', label: 'Reel', accept: 'video/*', multiple: false, help: 'Choose one video file.' },
+  { id: 'REELS', label: 'Reels', accept: 'video/*', multiple: true, help: 'Choose up to 5 videos. Each publishes as a separate Reel.' },
   { id: 'IMAGE', label: 'Image', accept: 'image/*', multiple: false, help: 'Choose one image file.' },
   { id: 'CAROUSEL', label: 'Carousel', accept: 'image/*', multiple: true, help: 'Choose 2–10 images.' },
 ];
@@ -42,6 +42,8 @@ export default function App() {
   const [caption, setCaption] = useState('');
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [publishing, setPublishing] = useState(false);
+  const [publishedFrom, setPublishedFrom] = useState('');
+  const [publishedTo, setPublishedTo] = useState('');
   const [message, setMessage] = useState(null);
   const [results, setResults] = useState([]);
 
@@ -103,6 +105,23 @@ export default function App() {
     setSelectedAccounts((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   }
 
+  function selectFiles(fileList) {
+    const selected = Array.from(fileList || []);
+    if (mediaType === 'REELS' && selected.length > 5) {
+      setFiles([]);
+      setMessage({ type: 'error', text: 'Choose no more than 5 videos at a time.' });
+      return;
+    }
+    const expectedType = mediaType === 'REELS' ? 'video/' : 'image/';
+    if (selected.some((file) => !file.type.startsWith(expectedType))) {
+      setFiles([]);
+      setMessage({ type: 'error', text: `Choose ${mediaType === 'REELS' ? 'video' : 'image'} files for this post type.` });
+      return;
+    }
+    setFiles(selected);
+    setMessage(null);
+  }
+
   async function uploadFile(file) {
     const resourceType = file.type.startsWith('video/') ? 'video' : 'image';
     const signed = await api('/api/media/signature', {
@@ -142,7 +161,7 @@ export default function App() {
       const historyWarning = successes.find((result) => result.error)?.error;
       setMessage({
         type: response.results.every((result) => result.ok) ? 'success' : 'error',
-        text: `${successes.length} of ${response.results.length} account(s) published successfully.${successes.length ? ' A CSV of this publish run was downloaded.' : ''}${historyWarning ? ` ${historyWarning}` : ''}`,
+        text: `${successes.length} of ${response.results.length} post(s) published successfully.${successes.length ? ' A CSV of this publish run was downloaded.' : ''}${historyWarning ? ` ${historyWarning}` : ''}`,
       });
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -177,7 +196,13 @@ export default function App() {
   const media = mediaTypes.find((type) => type.id === mediaType);
   const selectedFiles = Array.from(files);
   const canPublish = !publishing && selectedAccounts.length > 0 && selectedFiles.length > 0
-    && (mediaType !== 'CAROUSEL' || (selectedFiles.length >= 2 && selectedFiles.length <= 10));
+    && (mediaType === 'REELS' ? selectedFiles.length <= 5
+      : mediaType !== 'CAROUSEL' || (selectedFiles.length >= 2 && selectedFiles.length <= 10));
+  const historyParams = new URLSearchParams();
+  if (publishedFrom) historyParams.set('from', publishedFrom);
+  if (publishedTo) historyParams.set('to', publishedTo);
+  const historyQuery = historyParams.toString();
+  const historyUrl = `/api/instagram/history.csv${historyQuery ? `?${historyQuery}` : ''}`;
 
   return (
     <div className="app-shell">
@@ -203,7 +228,14 @@ export default function App() {
             {!status.accounts.length ? <div className="empty-state"><span>◎</span><h3>No accounts connected</h3><p>Connect an Instagram Business or Creator profile to get started.</p></div> : (
               <div className="account-list">{status.accounts.map((account) => <div className="account-row" key={account.id}><span className="account-avatar">{account.username.slice(0, 1).toUpperCase()}</span><div className="account-details"><strong>@{account.username}</strong><small>Instagram professional account · ID {account.id}</small></div><span className="connected-label"><span className="secure-dot" /> Connected</span><button className="text-button" onClick={() => disconnectAccount(account)}>Disconnect</button></div>)}</div>
             )}
-            <div className="csv-history"><div><strong>Publishing history</strong><p className="muted">Download the append-only CSV log of published post URLs.</p></div><a className="button secondary" href="/api/instagram/history.csv">Download history CSV</a></div>
+            <div className="csv-history">
+              <div className="csv-history-copy"><strong>Publishing history</strong><p className="muted">Download published posts within a date range.</p></div>
+              <div className="csv-history-controls">
+                <label>From<input type="date" max={publishedTo || undefined} value={publishedFrom} onChange={(event) => setPublishedFrom(event.target.value)} /></label>
+                <label>To<input type="date" min={publishedFrom || undefined} value={publishedTo} onChange={(event) => setPublishedTo(event.target.value)} /></label>
+                <a className="button secondary" href={historyUrl}>Download CSV</a>
+              </div>
+            </div>
           </section>
         ) : (
           <form className="composer-grid" onSubmit={publish}>
@@ -214,8 +246,8 @@ export default function App() {
               </section>
               <section className="content-card">
                 <div className="section-title"><span className="step">02</span><div><h2>Add your media</h2><p className="muted">Files are securely uploaded to Cloudinary before publishing.</p></div></div>
-                <label className="upload-zone"><input type="file" accept={media.accept} multiple={media.multiple} onChange={(event) => setFiles(Array.from(event.target.files || []))} /><span className="upload-icon">↑</span><strong>Choose {mediaType === 'CAROUSEL' ? 'images' : mediaType === 'REELS' ? 'a video' : 'an image'}</strong><span className="muted">{media.help}</span><span className="upload-link">Browse files</span></label>
-                {selectedFiles.length > 0 && <ul className="file-list">{selectedFiles.map((file) => <li key={`${file.name}-${file.size}`}>▧ <span>{file.name}</span><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></li>)}</ul>}
+                <label className="upload-zone"><input type="file" accept={media.accept} multiple={media.multiple} onChange={(event) => { selectFiles(event.target.files); event.target.value = ''; }} /><span className="upload-icon">↑</span><strong>Choose {mediaType === 'CAROUSEL' ? 'images' : mediaType === 'REELS' ? 'videos' : 'an image'}</strong><span className="muted">{media.help}</span><span className="upload-link">Browse files</span></label>
+                {selectedFiles.length > 0 && <ul className="file-list">{selectedFiles.map((file, index) => <li key={`${file.name}-${file.size}-${index}`}>▧ <span>{file.name}</span><small>{(file.size / (1024 * 1024)).toFixed(1)} MB</small></li>)}</ul>}
               </section>
               <section className="content-card">
                 <div className="section-title"><span className="step">03</span><div><h2>Write a caption</h2><p className="muted">Share the story behind your post.</p></div></div>
@@ -232,7 +264,7 @@ export default function App() {
                 <button className="button primary full publish-button" disabled={!canPublish}>{publishing ? 'Publishing…' : 'Publish now'} <span>↗</span></button>
                 <p className="publish-note">Your post will be published to {selectedAccounts.length} {selectedAccounts.length === 1 ? 'account' : 'accounts'}.</p>
               </section>
-              {results.length > 0 && <section className="content-card publish-results"><h2>Publish results</h2>{results.map((result) => <div key={result.accountId} className="result-row"><span className={result.ok ? 'result-ok' : 'result-fail'}>{result.ok ? '✓' : '!'}</span><span>@{result.username}</span>{result.postUrl && <a href={result.postUrl} target="_blank" rel="noreferrer">View post ↗</a>}<small>{result.error || ''}</small></div>)}</section>}
+              {results.length > 0 && <section className="content-card publish-results"><h2>Publish results</h2>{results.map((result) => <div key={`${result.accountId}-${result.mediaIndex}`} className="result-row"><span className={result.ok ? 'result-ok' : 'result-fail'}>{result.ok ? '✓' : '!'}</span><span>@{result.username}{mediaType === 'REELS' && selectedFiles.length > 1 ? ` · Video ${result.mediaIndex}` : ''}</span>{result.postUrl && <a href={result.postUrl} target="_blank" rel="noreferrer">View post ↗</a>}<small>{result.error || ''}</small></div>)}</section>}
             </aside>
           </form>
         )}

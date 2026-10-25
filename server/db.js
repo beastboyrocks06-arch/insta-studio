@@ -132,12 +132,16 @@ export async function recordPublishedPost(post) {
   return result.rows[0];
 }
 
-export async function getPublishedPosts() {
+export async function getPublishedPosts(from = null, to = null) {
   const result = await getPool().query(
     `SELECT published_at AS date, username AS account, media_type AS "mediaType",
             post_url AS "postUrl", media_id AS "mediaId"
-     FROM published_posts WHERE owner_id = $1 ORDER BY published_at`,
-    [ownerId()],
+     FROM published_posts
+     WHERE owner_id = $1
+       AND ($2::date IS NULL OR published_at >= ($2::date::timestamp AT TIME ZONE 'UTC'))
+       AND ($3::date IS NULL OR published_at < (($3::date + 1)::timestamp AT TIME ZONE 'UTC'))
+     ORDER BY published_at`,
+    [ownerId(), from, to],
   );
   return result.rows;
 }
