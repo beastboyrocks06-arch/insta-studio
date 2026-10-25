@@ -2,9 +2,10 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { config, configProblems } from './config.js';
-import authRoutes from './routes/auth.js';
+import authRoutes, { handleOAuthCallback } from './routes/auth.js';
 import instagramRoutes from './routes/instagram.js';
 import mediaRoutes from './routes/media.js';
+import { requireAuth } from './session.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +16,7 @@ app.use(express.json({ limit: '50kb' }));
 app.use(cookieParser());
 
 app.use('/api/auth', authRoutes);
+app.get('/api/ig/callback', requireAuth, handleOAuthCallback);
 app.use('/api/instagram', instagramRoutes);
 app.use('/api/media', mediaRoutes);
 

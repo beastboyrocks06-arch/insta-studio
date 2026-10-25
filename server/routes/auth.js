@@ -70,7 +70,7 @@ router.get('/instagram/login', requireAuth, (req, res) => {
   res.redirect(authorizationUrl(state));
 });
 
-router.get('/callback', requireAuth, async (req, res) => {
+export async function handleOAuthCallback(req, res) {
   const s = req.appSession;
   const { code, state, error, error_description, error_reason } = req.query;
   const saved = s.oauth;
@@ -91,7 +91,9 @@ router.get('/callback', requireAuth, async (req, res) => {
   } catch (err) {
     back(res, { error: `${err.stage || 'login'} failed: ${redact(err.message)}` });
   }
-});
+}
+
+router.get('/callback', requireAuth, handleOAuthCallback);
 
 router.delete('/accounts/:id', requireAuth, (req, res) => {
   const removed = req.appSession.connections.delete(req.params.id);
