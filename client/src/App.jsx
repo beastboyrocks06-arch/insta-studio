@@ -13,8 +13,8 @@ const api = async (path, opts = {}) => {
 };
 
 const mediaTypes = [
-  { id: 'REELS', label: 'Reels', accept: 'video/*', multiple: true, help: 'Choose up to 5 videos. Each publishes as a separate Reel.' },
-  { id: 'IMAGE', label: 'Image', accept: 'image/*', multiple: true, help: 'Choose up to 10 images. Assign each image to its own accounts.' },
+  { id: 'REELS', label: 'Reels', accept: 'video/*', multiple: true, help: 'Choose any number of videos. Each publishes as a separate Reel.' },
+  { id: 'IMAGE', label: 'Image', accept: 'image/*', multiple: true, help: 'Choose any number of images. Assign each image to its own accounts.' },
   { id: 'CAROUSEL', label: 'Carousel', accept: 'image/*,video/*', multiple: true, help: 'Choose 2–10 images and/or videos.' },
 ];
 
@@ -119,19 +119,10 @@ export default function App() {
 
   function selectFiles(fileList) {
     const selected = Array.from(fileList || []);
-    if (mediaType === 'REELS' && selected.length > 5) {
+    if (mediaType === 'CAROUSEL' && (selected.length < 2 || selected.length > 10)) {
       setFiles([]);
       setMediaAccounts([]);
-      setMessage({ type: 'error', text: 'Choose no more than 5 videos at a time.' });
-      return;
-    }
-    if ((mediaType === 'CAROUSEL' && (selected.length < 2 || selected.length > 10))
-      || (mediaType === 'IMAGE' && selected.length > 10)) {
-      setFiles([]);
-      setMediaAccounts([]);
-      setMessage({ type: 'error', text: mediaType === 'CAROUSEL'
-        ? 'Choose between 2 and 10 carousel items.'
-        : 'Choose no more than 10 images at a time.' });
+      setMessage({ type: 'error', text: 'Choose between 2 and 10 carousel items.' });
       return;
     }
     const isValidType = (file) => mediaType === 'CAROUSEL'
@@ -239,9 +230,7 @@ export default function App() {
     ? mediaAccounts.reduce((total, accountIds) => total + accountIds.length, 0)
     : selectedAccounts.length;
   const canPublish = !publishing && (mediaType === 'REELS' || mediaType === 'IMAGE' ? mediaAssignmentsComplete : selectedAccounts.length > 0) && selectedFiles.length > 0
-    && (mediaType === 'REELS' ? selectedFiles.length <= 5
-      : mediaType === 'IMAGE' ? selectedFiles.length <= 10
-      : mediaType !== 'CAROUSEL' || (selectedFiles.length >= 2 && selectedFiles.length <= 10));
+    && (mediaType !== 'CAROUSEL' || (selectedFiles.length >= 2 && selectedFiles.length <= 10));
   const historyParams = new URLSearchParams();
   if (publishedFrom) historyParams.set('from', publishedFrom);
   if (publishedTo) historyParams.set('to', publishedTo);

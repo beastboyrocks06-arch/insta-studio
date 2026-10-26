@@ -113,10 +113,8 @@ router.post('/publish', async (req, res, next) => {
   let requestedAccountIds = [];
   if (hasMediaAssignments) {
     const mediaAssignments = hasVideoAssignments ? videos : req.body.images;
-    const maxCount = hasVideoAssignments ? 5 : 10;
-    const mediaLabel = hasVideoAssignments ? 'videos' : 'images';
-    if (!Array.isArray(mediaAssignments) || mediaAssignments.length < 1 || mediaAssignments.length > maxCount) {
-      return res.status(400).json({ error: `Choose between 1 and ${maxCount} ${mediaLabel}.` });
+    if (!Array.isArray(mediaAssignments) || mediaAssignments.length < 1) {
+      return res.status(400).json({ error: 'Choose at least one media item.' });
     }
     try {
       assignments = mediaAssignments.map((item, index) => {
@@ -158,11 +156,8 @@ router.post('/publish', async (req, res, next) => {
         return res.status(400).json({ error: error.message });
       }
     }
-    if ((mediaType === 'REELS' && (mediaUrls.length < 1 || mediaUrls.length > 5))
-      || (mediaType === 'IMAGE' && mediaUrls.length !== 1)) {
-      const error = mediaType === 'REELS' ? 'Choose between 1 and 5 videos.'
-        : 'Choose exactly one image.';
-      return res.status(400).json({ error });
+    if (mediaUrls.length < 1) {
+      return res.status(400).json({ error: `Choose at least one ${mediaType === 'REELS' ? 'video' : 'image'}.` });
     }
     if (accountIds.some((id) => typeof id !== 'string' || !id.trim())) {
       return res.status(400).json({ error: 'Select valid Instagram accounts.' });
@@ -191,7 +186,7 @@ router.post('/publish', async (req, res, next) => {
       mediaIndex: item.mediaIndex,
       mediaItems: [{ mediaUrl: item.mediaUrl, mediaType: hasVideoAssignments ? 'VIDEO' : 'IMAGE' }],
     })))
-    : connections.flatMap((connection) => (mediaType === 'REELS' ? urls.map((mediaUrl) => [mediaUrl]) : [mediaType === 'CAROUSEL' ? carouselItems : urls])
+    : connections.flatMap((connection) => (mediaType === 'REELS' || mediaType === 'IMAGE' ? urls.map((mediaUrl) => [mediaUrl]) : [carouselItems])
       .map((items, index) => ({
         connection,
         mediaIndex: index + 1,
