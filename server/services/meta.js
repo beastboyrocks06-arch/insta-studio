@@ -24,6 +24,11 @@ async function call(url, opts, stage) {
   return body;
 }
 const form = (o) => ({ method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o) });
+const graphForm = (fields) => {
+  const body = new FormData();
+  for (const [key, value] of Object.entries(fields)) body.append(key, String(value));
+  return { method: 'POST', body };
+};
 const qs = (o) => new URLSearchParams(o).toString();
 
 export function authorizationUrl(state) {
@@ -82,19 +87,19 @@ async function fbLogin(code) {
 const base = (id) => (isIG ? `https://graph.instagram.com/${v}/${id}` : `https://graph.facebook.com/${v}/${id}`);
 
 export const createReelContainer = (conn, videoUrl, caption) =>
-  call(base(`${conn.igUserId}/media`), form({ media_type: 'REELS', video_url: videoUrl, caption, access_token: conn.accessToken }), 'create_container');
+  call(base(`${conn.igUserId}/media`), graphForm({ media_type: 'REELS', video_url: videoUrl, caption, access_token: conn.accessToken }), 'create_container');
 
 export const getContainerStatus = (conn, containerId) =>
   call(`${base(containerId)}?${qs({ fields: 'status_code,status', access_token: conn.accessToken })}`, {}, 'poll_status');
 
 export const publishContainer = (conn, containerId) =>
-  call(base(`${conn.igUserId}/media_publish`), form({ creation_id: containerId, access_token: conn.accessToken }), 'publish');
+  call(base(`${conn.igUserId}/media_publish`), graphForm({ creation_id: containerId, access_token: conn.accessToken }), 'publish');
 
 export const createImageContainer = (conn, imageUrl, caption) =>
-  call(base(`${conn.igUserId}/media`), form({ image_url: imageUrl, caption, access_token: conn.accessToken }), 'create_container');
+  call(base(`${conn.igUserId}/media`), graphForm({ image_url: imageUrl, caption, access_token: conn.accessToken }), 'create_container');
 
 export const createCarouselItem = (conn, mediaUrl, mediaType) =>
-  call(base(`${conn.igUserId}/media`), form({
+  call(base(`${conn.igUserId}/media`), graphForm({
     [mediaType === 'VIDEO' ? 'video_url' : 'image_url']: mediaUrl,
     ...(mediaType === 'VIDEO' ? { media_type: 'VIDEO' } : {}),
     is_carousel_item: 'true',
@@ -102,7 +107,7 @@ export const createCarouselItem = (conn, mediaUrl, mediaType) =>
   }), 'create_carousel_item');
 
 export const createCarouselContainer = (conn, childIds, caption) =>
-  call(base(`${conn.igUserId}/media`), form({
+  call(base(`${conn.igUserId}/media`), graphForm({
     media_type: 'CAROUSEL',
     children: childIds.join(','),
     caption,

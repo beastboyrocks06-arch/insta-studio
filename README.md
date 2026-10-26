@@ -12,7 +12,7 @@ A private React + Vite and Express app for signing in, connecting Instagram prof
 | Publish host | `graph.instagram.com` | `graph.facebook.com` |
 | Scopes | `instagram_business_basic`, `instagram_business_content_publish` | `pages_show_list`, `pages_read_engagement`, `instagram_basic`, `instagram_content_publish` |
 
-Both flows publish the same way: `POST /{ig-id}/media` (`media_type=REELS`, `video_url`, `caption`) -> poll `GET /{container-id}?fields=status_code,status` until `FINISHED` -> `POST /{ig-id}/media_publish`.
+Both flows publish the same way: send media details and `caption` as multipart form data to `POST /{ig-id}/media` (`media_type=REELS`, `video_url`, `caption`) -> poll `GET /{container-id}?fields=status_code,status` until `FINISHED` -> send `creation_id` to `POST /{ig-id}/media_publish`.
 
 These endpoints and scopes are from my knowledge of Meta's docs, not verified live. Check them against developers.facebook.com before relying on them; Meta changes versions and scope names.
 
